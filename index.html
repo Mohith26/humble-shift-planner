@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shift plan · Humble Fleet</title>
+<meta name="description" content="Concept: a shift planner for Humble Hauler fleets. Proven-minimum fleet size and grid-aware depot charging on real Port of Oakland roads.">
+<link rel="icon" href="assets/cta-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@300;400;500;600&family=Funnel+Sans:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="announce" id="announce" role="region" aria-label="Announcement">
+  <span>Concept feature: Shift plan sizes a Hauler fleet with a proven minimum and keeps depot charging inside the grid subscription.</span>
+  <span class="tri" aria-hidden="true"></span><a href="#/method">How it works</a>
+  <button class="x" aria-label="Dismiss announcement" onclick="this.parentElement.remove()"><svg width="14" height="14" viewBox="0 0 14 14" stroke-width="1.5"><path d="M1 1l12 12M13 1L1 13"/></svg></button>
+</div>
+<div class="frame l" aria-hidden="true"></div><div class="frame r" aria-hidden="true"></div>
+<svg class="chev l" viewBox="0 0 80 60" preserveAspectRatio="none" aria-hidden="true"><path d="M0 0 L80 44 L80 60" fill="none" stroke="#777674" stroke-width="1"/></svg><svg class="chev r" viewBox="0 0 80 60" preserveAspectRatio="none" aria-hidden="true"><path d="M0 0 L80 44 L80 60" fill="none" stroke="#777674" stroke-width="1"/></svg>
+<div class="shell">
+  <div class="navwrap">
+    <nav class="navbar" aria-label="Primary">
+      <a href="#/plan" aria-label="Humble Fleet home"><img class="logo" src="assets/humble-logo.png" alt="Humble"></a>
+      <div class="navlinks">
+        <a href="#/plan" data-nav="fleet">Fleet</a>
+        <a href="#/plan" data-nav="plan" class="on">Shift plan</a>
+        <a href="#/lanes" data-nav="lanes">Lanes</a>
+        <a href="#/moves" data-nav="moves">Moves</a>
+        <a href="#/method" data-nav="method">Method</a>
+      </div>
+      <button class="btn btn-white" id="exportBtn" aria-label="Export plan (E)">Export plan <img class="dot" src="assets/cta-icon.png" alt=""></button>
+    </nav>
+  </div>
+  <main id="app" aria-live="polite">
+    <div class="skeleton" style="height:120px;margin:44px 0 22px"></div>
+    <div class="skeleton" style="height:132px;margin-bottom:22px"></div>
+    <div class="skeleton" style="height:560px"></div>
+  </main>
+  <footer>
+    <span>Unofficial concept demo by Mohith Gajjela. Not affiliated with Humble Robotics. Synthetic move list on public data: OpenStreetMap roads (OSRM), NASA SRTM elevation, PG&amp;E BEV tariff, Port of Oakland turn times.</span>
+    <span><kbd>?</kbd> shortcuts</span>
+  </footer>
+</div>
+<div class="tip" id="tip" role="tooltip"></div>
+<div class="toast" id="toast" role="status"></div>
+<div class="overlay" id="help" role="dialog" aria-modal="true" aria-labelledby="helpT">
+  <div class="modal">
+    <h3 id="helpT">Keyboard shortcuts</h3>
+    <div class="sc">
+      <span>Plan / Haulers / Moves / Lanes / Method</span><span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> <kbd>5</kbd></span>
+      <span>Re-plan with current settings</span><span><kbd>R</kbd></span>
+      <span>Apply draft plan</span><span><kbd>A</kbd></span>
+      <span>Export dispatch sheet (CSV)</span><span><kbd>E</kbd></span>
+      <span>Next / previous Hauler</span><span><kbd>J</kbd> <kbd>K</kbd></span>
+      <span>Search moves</span><span><kbd>/</kbd></span>
+      <span>Close</span><span><kbd>Esc</kbd></span>
+    </div>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

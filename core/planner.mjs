@@ -128,6 +128,7 @@ export function buildInstance(data, params = {}) {
     chargerKw: params.chargerKw ?? 250,
     subscriptionKw: params.subscriptionKw ?? 1000,
     deadheadPerMi: params.deadheadPerMi ?? 0.25,
+    dockKw: params.dockKw ?? 0, // optional charger at the customer dock, used during live unload/load
     depot: 'depot',
   };
   const socMax = v.maxSoc * cap, socMin = v.reserveSoc * cap;
@@ -161,11 +162,17 @@ export function buildInstance(data, params = {}) {
     t += mv.turn_in_min;
     const idle3 = (v.auxIdleKw * mv.turn_in_min) / 60;
     const e = t;
-    const energy = idle1 + l1.kwh + idle2 + l2.kwh + idle3;
-    const need = Math.max(idle1 + l1.peakKwh, idle1 + l1.kwh + idle2 + l2.peakKwh, energy);
+    // Dock charging: the Hauler is the chassis, so it waits under the box during live unload.
+    // With a dock charger it can win back at most what the out leg used (so it never exceeds the
+    // charge it left with, which is <= the ceiling).
+    const dockKwh = P.dockKw > 0 ? Math.min((P.dockKw * mv.dwell_min / 60) * v.etaCharge, idle1 + l1.kwh) : 0;
+    const dockSlot = Math.min(N_SLOTS - 1, Math.max(0, Math.floor((arriveDc + mv.dwell_min / 2) / SLOT_MIN)));
+    const energy = idle1 + l1.kwh + idle2 - dockKwh + l2.kwh + idle3;
+    const need = Math.max(idle1 + l1.peakKwh, idle1 + l1.kwh + idle2 - dockKwh + l2.peakKwh, energy);
     const trip = {
       id: mv.id, idx: trips.length, kind: mv.kind, terminal: mv.terminal, dc: mv.dc,
       s, e, arriveDc, energy, need, miles: l1.mi + l2.mi, cargo_t: mv.cargo_t,
+      dockKwh, dockCost: dockKwh > 0 ? (dockKwh / v.etaCharge) * slotPrice(dockSlot) : 0,
       legs: [{ kwh: l1.kwh, mi: l1.mi, min: l1.s / 60 }, { kwh: l2.kwh, mi: l2.mi, min: l2.s / 60 }],
     };
     // feasible alone from a full depot charge?
@@ -1000,11 +1007,14 @@ export function evaluate(inst, routes, opts = {}) {
   const byPeriod = { peak: 0, offPeak: 0, superOffPeak: 0 };
   for (let t = 0; t < N_SLOTS; t++) byPeriod[TARIFF_BEV2S.periodOfHour(Math.floor(slotHour(t)))] += (power[t] * SLOT_MIN) / 60;
   const moveMiles = routes.reduce((s, r) => s + r.trips.reduce((a, i) => a + trips[i].miles, 0), 0);
+  let dockKwh = 0, dockCost = 0;
+  for (const r of routes) for (const i of r.trips) { dockKwh += trips[i].dockKwh || 0; dockCost += trips[i].dockCost || 0; }
+  energyCost += dockCost;
   return {
     valid: errors.length === 0 && overKw === 0, errors, overKw,
     fleet: routes.length, moves: trips.length, peakKw, maxPlugs,
     power: Array.from(power), plugs: Array.from(plugs),
-    gridKwh, energyCost, dhMi, moveMiles,
+    gridKwh, energyCost, dhMi, moveMiles, dockKwh, dockCost,
     cost: energyCost + dhMi * P.deadheadPerMi,
     costPerMove: (energyCost + dhMi * P.deadheadPerMi) / Math.max(1, trips.length),
     peakShareKwh: byPeriod.peak, byPeriod, minMarginKwh: minSocSeen - inst.socMin, timelines,

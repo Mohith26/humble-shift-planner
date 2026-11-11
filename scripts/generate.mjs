@@ -75,6 +75,18 @@ export function computeResults(routesJson, movesJson, opts = {}) {
     });
     if (S === base.subscriptionKw) main = { inst, pl, g };
   }
+  // dock-charging what-if: a charger at the customer dock used during live unload/load
+  const dockFrontier = [];
+  const dockInc = [];
+  for (const S of opts.dockLevels || [400, 500, 600, 750, 1000]) {
+    const instD = PL.buildInstance(data, { ...base, subscriptionKw: S, dockKw: 150 });
+    const plD = PL.plan(instD, { incumbents: dockInc, timeBudgetMs: opts.timeBudgetMs ?? 8000 });
+    if (plD.routes.length) dockInc.push(plD.routes);
+    const gD = PL.greedyBaseline(instD);
+    dockFrontier.push({ subscriptionKw: S, dockKw: 150, lbLP: plD.lowerBounds.lp, fleet: plD.fleet, proven: plD.provenOptimal,
+      energyCost: plD.metrics ? +plD.metrics.energyCost.toFixed(2) : null, gridKwh: plD.metrics ? +plD.metrics.gridKwh.toFixed(1) : null, dockKwh: plD.metrics ? +plD.metrics.dockKwh.toFixed(1) : null,
+      greedyFleet: gD.fleet, greedyValid: gD.metrics.valid });
+  }
   const { inst, pl, g } = main;
   const gu = PL.greedyBaseline(inst, { ignoreCap: true });
   const r2 = (x) => Math.round(x * 100) / 100;
@@ -93,6 +105,7 @@ export function computeResults(routesJson, movesJson, opts = {}) {
       uncapped: { fleet: gu.fleet, energyCost: r2(gu.metrics.energyCost), peakKw: r2(gu.metrics.peakKw), byPeriod: gu.metrics.byPeriod, power: gu.metrics.power.map(r2), subscription: PL.subscriptionMonthly(gu.metrics.peakKw) },
     },
     frontier,
+    dockFrontier,
   };
 }
 
@@ -104,4 +117,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   console.log('plan', res.plan.fleet, 'proven', res.plan.provenOptimal, 'LB', JSON.stringify(res.plan.lowerBounds), '$', res.plan.metrics.energyCost, 'gap', res.plan.costGap);
   console.log('baseline', JSON.stringify({ c: { f: res.baseline.capped.fleet, v: res.baseline.capped.valid, $: res.baseline.capped.energyCost }, u: { f: res.baseline.uncapped.fleet, peak: res.baseline.uncapped.peakKw, $: res.baseline.uncapped.energyCost } }));
   for (const f of res.frontier) console.log(JSON.stringify(f));
+  for (const f of res.dockFrontier) console.log('dock', JSON.stringify(f));
 }

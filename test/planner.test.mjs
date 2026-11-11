@@ -239,3 +239,20 @@ test('README quotes the committed numbers', () => {
   assert.ok(md.includes(`${results.plan.fleet} Haulers`));
   assert.ok(md.includes(Math.round(results.baseline.uncapped.peakKw).toLocaleString('en-US') + ' kW'));
 });
+
+test('dock charging during live unload: capped by the out-leg energy, and 28 Haulers on 500 kW (proven)', () => {
+  const inst0 = P.buildInstance({ routes: R, moves: movesJson.moves }, { subscriptionKw: 500 });
+  const inst = P.buildInstance({ routes: R, moves: movesJson.moves }, { subscriptionKw: 500, dockKw: 150 });
+  for (let i = 0; i < inst.trips.length; i++) {
+    const a = inst0.trips.find((t) => t.id === inst.trips[i].id), b = inst.trips[i];
+    const mvRow = movesJson.moves.find((m) => m.id === b.id);
+    const outUsed = a.legs[0].kwh + (inst.vehicle.auxIdleKw * mvRow.turn_out_min) / 60;
+    assert.ok(b.dockKwh <= outUsed + 1e-9, 'never more than the out leg used, so the charge never exceeds the start level');
+    assert.ok(Math.abs(a.energy - b.energy - b.dockKwh) < 1e-9);
+  }
+  assert.equal(P.plan(inst0).fleet, null, 'without dock chargers 500 kW cannot work');
+  const pl = P.plan(inst);
+  assert.equal(pl.fleet, 28); assert.ok(pl.provenOptimal); assert.ok(pl.metrics.valid);
+  const d500 = results.dockFrontier.find((f) => f.subscriptionKw === 500);
+  assert.equal(d500.fleet, 28);
+});

@@ -31,10 +31,10 @@ async function boot() {
     app.innerHTML = `<div class="err" style="margin-top:44px"><div class="eyebrow"><span class="num">!</span> Couldn't load plan data</div><p>${esc(e.message)}</p><button class="btn btn-white" onclick="location.reload()">Retry</button></div>`;
     return;
   }
-  const defaults = { subscriptionKw: S.results.params.subscriptionKw, chargers: S.results.params.chargers, chargerKw: S.results.params.chargerKw, reserve: 10 };
+  const defaults = { subscriptionKw: S.results.params.subscriptionKw, chargers: S.results.params.chargers, chargerKw: S.results.params.chargerKw, reserve: 10, dockKw: 0 };
   const committed = { params: defaults, result: { ...S.results.plan, routes: S.results.plan.routes } };
   let applied = committed;
-  try { const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); if (saved && saved.result && saved.result.routes) applied = saved; } catch { /* ignore */ }
+  try { const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); if (saved && saved.result && saved.result.routes) applied = { ...saved, params: { dockKw: 0, ...saved.params } }; } catch { /* ignore */ }
   const urlParams = paramsFromUrl(applied.params);
   setApplied(applied);
   initWorker();
@@ -50,15 +50,15 @@ async function boot() {
 function paramsFromUrl(fallback) {
   const q = new URLSearchParams(location.search);
   const num = (k, d) => (q.has(k) && Number.isFinite(+q.get(k)) ? +q.get(k) : d);
-  return { subscriptionKw: num('kw', fallback.subscriptionKw), chargers: num('disp', fallback.chargers), chargerKw: num('dkw', fallback.chargerKw), reserve: num('res', fallback.reserve) };
+  return { subscriptionKw: num('kw', fallback.subscriptionKw), chargers: num('disp', fallback.chargers), chargerKw: num('dkw', fallback.chargerKw), reserve: num('res', fallback.reserve), dockKw: num('dock', fallback.dockKw || 0) };
 }
-function sameParams(a, b) { return ['subscriptionKw', 'chargers', 'chargerKw', 'reserve'].every((k) => +a[k] === +b[k]); }
+function sameParams(a, b) { return ['subscriptionKw', 'chargers', 'chargerKw', 'reserve', 'dockKw'].every((k) => +(a[k] || 0) === +(b[k] || 0)); }
 function writeUrl(p) {
-  const q = new URLSearchParams({ kw: p.subscriptionKw, disp: p.chargers, dkw: p.chargerKw, res: p.reserve });
+  const q = new URLSearchParams({ kw: p.subscriptionKw, disp: p.chargers, dkw: p.chargerKw, res: p.reserve, dock: p.dockKw || 0 });
   history.replaceState(null, '', location.pathname + '?' + q.toString() + location.hash);
 }
 function buildInst(p) {
-  return P.buildInstance(S.data, { subscriptionKw: p.subscriptionKw, chargers: p.chargers, chargerKw: p.chargerKw, vehicle: { reserveSoc: p.reserve / 100 } });
+  return P.buildInstance(S.data, { subscriptionKw: p.subscriptionKw, chargers: p.chargers, chargerKw: p.chargerKw, dockKw: p.dockKw || 0, vehicle: { reserveSoc: p.reserve / 100 } });
 }
 
 function setApplied(applied, persist) {
@@ -95,7 +95,7 @@ function replan(params, autoApply) {
   renderBusy();
   const incumbents = [S.applied.result.routes];
   const id = ++S.reqId;
-  if (S.worker) S.worker.postMessage({ type: 'plan', id, params: { subscriptionKw: params.subscriptionKw, chargers: params.chargers, chargerKw: params.chargerKw, vehicle: { reserveSoc: params.reserve / 100 } }, incumbents });
+  if (S.worker) S.worker.postMessage({ type: 'plan', id, params: { subscriptionKw: params.subscriptionKw, chargers: params.chargers, chargerKw: params.chargerKw, dockKw: params.dockKw || 0, vehicle: { reserveSoc: params.reserve / 100 } }, incumbents });
   else setTimeout(() => {
     try {
       const inst = buildInst(params); const t0 = Date.now();
@@ -151,7 +151,7 @@ function tabs(active) {
 
 function header(title, sub, withImg) {
   const p = S.applied.params;
-  return `<section class="head"><div><div class="eyebrow"><span class="num">01</span>SHIFT PLAN · PORT OF OAKLAND DRAYAGE · SERVICE DAY 05:00 TO 05:00</div><h1>${title}</h1><div class="sub">${sub || `${fmt(S.inst.trips.length)} container moves · ${fmt(p.subscriptionKw)} kW ${P.TARIFF_BEV2S.name} subscription · ${p.chargers} dispensers × ${p.chargerKw} kW`}</div></div>${withImg ? '<img class="hauler" src="assets/hauler.png" alt="Humble Hauler with a 40-foot container">' : ''}</section>`;
+  return `<section class="head"><div><div class="eyebrow"><span class="num">01</span>SHIFT PLAN · PORT OF OAKLAND DRAYAGE · SERVICE DAY 05:00 TO 05:00</div><h1>${title}</h1><div class="sub">${sub || `${fmt(S.inst.trips.length)} container moves · ${fmt(p.subscriptionKw)} kW ${P.TARIFF_BEV2S.name} subscription · ${p.chargers} dispensers × ${p.chargerKw} kW${p.dockKw ? ` · ${p.dockKw} kW dock chargers` : ''}`}</div></div>${withImg ? '<img class="hauler" src="assets/hauler.png" alt="Humble Hauler with a 40-foot container">' : ''}</section>`;
 }
 
 // ------------------------------------------------------------------ plan view
@@ -171,7 +171,7 @@ function renderPlan() {
     <div class="kpi"><div class="lab"><span class="num">03</span>Energy cost / day</div><div class="val">${usd(m.energyCost)}<small>${usd(m.energyCost / S.inst.trips.length, 2)}/move</small></div>
       <div class="cmp">First-come: <span class="bad">${usd(g.metrics.energyCost)}</span> · <b>${fmt(100 * (1 - m.energyCost / g.metrics.energyCost))}% less</b> · ${fmt(m.byPeriod.peak)} kWh in 4-9 PM peak</div></div>
     <div class="kpi"><div class="lab"><span class="num">04</span>Moves covered</div><div class="val">${S.inst.trips.length}<small>/ ${S.data.moves.length}</small></div>
-      <div class="cmp">${m.valid ? '<b>Validated</b>: every SOC, slot and dispenser replayed' : '<span class="bad">' + m.errors.length + ' issues</span>'} · min reserve margin ${fmt(m.minMarginKwh)} kWh</div></div>
+      <div class="cmp">${m.valid ? '<b>Validated</b>: every SOC, slot and dispenser replayed' : '<span class="bad">' + m.errors.length + ' issues</span>'} · ${m.dockKwh > 0 ? `${fmt(m.dockKwh)} kWh charged at customer docks` : `min reserve margin ${fmt(m.minMarginKwh)} kWh`}</div></div>
   </section>
   <div class="grid2">
     <div>
@@ -325,34 +325,37 @@ function certificate() {
 }
 
 function frontierPanel() {
-  const F = S.results.frontier, cur = S.applied.params.subscriptionKw;
-  const W = 380, H = 190, L = 34, R = 10, T = 14, B = 30;
-  const xs = F.map((f) => f.subscriptionKw);
-  const vals = F.flatMap((f) => [f.fleet, f.lbLP, f.greedyFleet]).filter((v) => v != null);
+  const F = S.results.frontier, D = S.results.dockFrontier || [], cur = S.applied.params.subscriptionKw;
+  const W = 380, H = 200, L = 34, R = 10, T = 14, B = 30;
+  const xs = [...F, ...D].map((f) => f.subscriptionKw);
+  const xmin = Math.min(...xs) - 40, xmax = Math.max(...xs) + 20;
+  const vals = [...F, ...D].flatMap((f) => [f.fleet, f.lbLP, f.greedyFleet]).filter((v) => v != null);
   const y0 = Math.min(...vals) - 1, y1 = Math.max(...vals) + 1;
-  const x = (v) => L + ((W - L - R) * (v - xs[0])) / (xs[xs.length - 1] - xs[0]);
+  const x = (v) => L + ((W - L - R) * (v - xmin)) / (xmax - xmin);
   const y = (v) => T + (H - T - B) * (1 - (v - y0) / (y1 - y0));
   let g = '';
   for (let v = y0; v <= y1; v++) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#fafff2" stroke-opacity=".06"/><text x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${v}</text>`;
-  for (const f of F) g += `<text x="${x(f.subscriptionKw)}" y="${H - 12}" text-anchor="middle">${f.subscriptionKw >= 1000 ? (f.subscriptionKw / 1000).toFixed(1) + 'k' : f.subscriptionKw}</text>`;
-  const line = (key) => F.filter((f) => f[key] != null).map((f, i) => `${i ? 'L' : 'M'}${x(f.subscriptionKw)},${y(f[key])}`).join(' ');
-  const pts = F.map((f) => (f.fleet != null ? `<circle cx="${x(f.subscriptionKw)}" cy="${y(f.fleet)}" r="${f.subscriptionKw === cur ? 5 : 3.5}" fill="${f.proven ? '#81f2b2' : '#0000'}" stroke="#81f2b2" stroke-width="1.5"><title>${f.subscriptionKw} kW: ${f.fleet} Haulers${f.proven ? ' (proven)' : ''}</title></circle>` : `<text x="${x(f.subscriptionKw)}" y="${y(f.lbLP ?? y1) - 8}" text-anchor="middle" style="fill:#ef682c">?</text>`)).join('');
+  for (const v of [400, 600, 800, 1000, 1200, 1400]) if (v >= xmin && v <= xmax) g += `<text x="${x(v)}" y="${H - 12}" text-anchor="middle">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v} kW</text>`;
+  const line = (arr, key) => arr.filter((f) => f[key] != null).map((f, i) => `${i ? 'L' : 'M'}${x(f.subscriptionKw)},${y(f[key])}`).join(' ');
+  const pts = (arr, col) => arr.map((f) => (f.fleet != null ? `<circle cx="${x(f.subscriptionKw)}" cy="${y(f.fleet)}" r="${f.subscriptionKw === cur ? 5 : 3.5}" fill="${f.proven ? col : '#000'}" stroke="${col}" stroke-width="1.5"><title>${f.subscriptionKw} kW${f.dockKw ? ' + ' + f.dockKw + ' kW dock chargers' : ''}: ${f.fleet} Haulers${f.proven ? ' (proven)' : ''}</title></circle>` : `<text x="${x(f.subscriptionKw)}" y="${y(f.lbLP ?? y1) + 4}" text-anchor="middle" style="fill:${col}">×</text>`)).join('');
   const greedyInvalid = F.filter((f) => !f.greedyValid).map((f) => `<circle cx="${x(f.subscriptionKw)}" cy="${y(f.greedyFleet)}" r="3.5" fill="#000" stroke="#ef682c" stroke-width="1.5"><title>${f.subscriptionKw} kW: first-come dispatch cannot recharge the fleet</title></circle>`).join('');
   const tightest = F.filter((f) => f.fleet != null && f.proven).sort((a, b) => a.subscriptionKw - b.subscriptionKw)[0];
   const greedyMin = F.filter((f) => f.greedyValid).sort((a, b) => a.subscriptionKw - b.subscriptionKw)[0];
+  const dockMin = D.filter((f) => f.fleet != null && f.proven).sort((a, b) => a.subscriptionKw - b.subscriptionKw)[0];
   return `<section class="panel" aria-label="Fleet versus grid subscription"><div class="ph"><span class="num">08</span><h2>Haulers vs grid subscription</h2><div class="meta">precomputed</div></div>
   <div class="pb"><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Haulers needed at each subscription level">${g}
     <line x1="${x(cur)}" x2="${x(cur)}" y1="${T}" y2="${H - B}" stroke="#ecfd9a" stroke-opacity=".5" stroke-dasharray="2 3"/>
-    <path d="${line('greedyFleet')}" fill="none" stroke="#ef682c" stroke-width="1.2" stroke-dasharray="4 3"/>${greedyInvalid}
-    <path d="${line('lbLP')}" fill="none" stroke="#ecfd9a" stroke-width="1" stroke-opacity=".7"/>
-    <path d="${line('fleet')}" fill="none" stroke="#81f2b2" stroke-width="1.5"/>${pts}</svg>
-  <div class="chart-note"><span><i style="background:#81f2b2"></i>Plan (filled = proven)</span><span><i style="background:#ecfd9a"></i>LP bound</span><span><i style="background:#ef682c"></i>First-come (hollow = can't recharge)</span></div>
-  <p style="font-size:.85rem;color:var(--g-400);margin:10px 0 0">${tightest ? `Down to <b style="color:var(--optimist)">${fmt(tightest.subscriptionKw)} kW</b> the plan still needs only ${tightest.fleet} Haulers (proven). ` : ''}${greedyMin ? `First-come charging needs ${greedyMin.greedyFleet} Haulers and at least ${fmt(greedyMin.subscriptionKw)} kW to recharge the fleet by 05:00.` : ''}</p></div></section>`;
+    <path d="${line(F, 'greedyFleet')}" fill="none" stroke="#ef682c" stroke-width="1.2" stroke-dasharray="4 3"/>${greedyInvalid}
+    <path d="${line(F, 'lbLP')}" fill="none" stroke="#ecfd9a" stroke-width="1" stroke-opacity=".6"/>
+    <path d="${line(D, 'fleet')}" fill="none" stroke="#83ecff" stroke-width="1.3" stroke-dasharray="3 2"/>${pts(D, '#83ecff')}
+    <path d="${line(F, 'fleet')}" fill="none" stroke="#81f2b2" stroke-width="1.5"/>${pts(F, '#81f2b2')}</svg>
+  <div class="chart-note"><span><i style="background:#81f2b2"></i>Plan (filled = proven)</span><span><i style="background:#83ecff"></i>+150 kW dock chargers</span><span><i style="background:#ecfd9a"></i>LP bound</span><span><i style="background:#ef682c"></i>First-come (hollow = can't recharge)</span></div>
+  <p style="font-size:.85rem;color:var(--g-400);margin:10px 0 0">${tightest ? `Down to <b style="color:var(--optimist)">${fmt(tightest.subscriptionKw)} kW</b> the plan still needs only ${tightest.fleet} Haulers (proven). ` : ''}${greedyMin ? `First-come charging needs ${greedyMin.greedyFleet} and at least ${fmt(greedyMin.subscriptionKw)} kW to recharge the fleet by 05:00. ` : ''}${dockMin ? `Because the Hauler waits under the box during live unload, a 150 kW dock charger gets the fleet to <b style="color:var(--optimist)">${dockMin.fleet} Haulers on ${fmt(dockMin.subscriptionKw)} kW</b> (proven).` : ''}</p></div></section>`;
 }
 
 function whatIf() {
   const p = S.applied.params;
-  const kwOpts = []; for (let v = 500; v <= 1600; v += 50) kwOpts.push(v);
+  const kwOpts = []; for (let v = 400; v <= 1600; v += 50) kwOpts.push(v);
   const sel = (id, opts, cur, fmtFn) => `<select id="${id}">${opts.map((o) => `<option value="${o}" ${+o === +cur ? 'selected' : ''}>${fmtFn(o)}</option>`).join('')}</select>`;
   const d = S.draft;
   let draftHtml = '';
@@ -361,7 +364,7 @@ function whatIf() {
   else if (d) {
     const ok = d.result.routes.length > 0;
     const cur = S.metrics;
-    draftHtml = `<div class="draft show"><div class="eyebrow"><span class="num">●</span>DRAFT · ${fmt(d.params.subscriptionKw)} kW · ${d.params.chargers}×${d.params.chargerKw} kW · reserve ${d.params.reserve}% · ${fmt(d.ms / 1000, 1)} s</div>
+    draftHtml = `<div class="draft show"><div class="eyebrow"><span class="num">●</span>DRAFT · ${fmt(d.params.subscriptionKw)} kW · ${d.params.chargers}×${d.params.chargerKw} kW · reserve ${d.params.reserve}%${d.params.dockKw ? ` · dock ${d.params.dockKw} kW` : ''} · ${fmt(d.ms / 1000, 1)} s</div>
       ${ok ? `<div class="dl"><span class="h"></span><span class="h">Applied</span><span class="h">Draft</span>
         <span>Haulers</span><span>${S.applied.result.fleet}</span><span>${d.result.fleet}${d.result.provenOptimal ? ' ✓' : ` (≥${d.result.lowerBounds.lp})`}</span>
         <span>Peak kW</span><span>${fmt(cur.peakKw)}</span><span>${fmt(d.metrics.peakKw)}</span>
@@ -372,10 +375,11 @@ function whatIf() {
   }
   return `<section class="panel whatif" aria-label="What-if"><div class="ph"><span class="num">09</span><h2>What if</h2><div class="meta">re-solves in your browser</div></div><div class="pb">
     <div class="fields">
-      <div class="field"><label for="f-kw">Grid subscription</label>${sel('f-kw', kwOpts, p.subscriptionKw, (v) => `${fmt(v)} kW · ${P.subscriptionMonthly(v).blocks} blocks`)}</div>
+      <div class="field"><label for="f-kw">Grid subscription</label>${sel('f-kw', kwOpts, p.subscriptionKw, (v) => `${fmt(v)} kW (${P.subscriptionMonthly(v).blocks} blocks)`)}</div>
       <div class="field"><label for="f-disp">Dispensers</label>${sel('f-disp', [4, 6, 8, 10, 12], p.chargers, (v) => v)}</div>
       <div class="field"><label for="f-dkw">Dispenser power</label>${sel('f-dkw', [150, 250, 350], p.chargerKw, (v) => v + ' kW')}</div>
       <div class="field"><label for="f-res">Reserve at all times</label>${sel('f-res', [10, 15, 20], p.reserve, (v) => v + '%')}</div>
+      <div class="field" style="grid-column:1/-1"><label for="f-dock">Charger at the customer dock (used during live unload)</label>${sel('f-dock', [0, 50, 150], p.dockKw || 0, (v) => (v ? v + ' kW' : 'None'))}</div>
     </div>
     <div class="acts"><button class="btn btn-white btn-sm" id="replanBtn" ${S.busy ? 'disabled' : ''}>Re-plan <kbd>R</kbd></button>
       <button class="btn btn-ghost btn-sm" id="csvBtn">Dispatch CSV</button><button class="btn btn-ghost btn-sm" id="jsonBtn">Plan JSON</button>
@@ -384,7 +388,7 @@ function whatIf() {
 }
 
 function readWhatIf() {
-  return { subscriptionKw: +$('#f-kw').value, chargers: +$('#f-disp').value, chargerKw: +$('#f-dkw').value, reserve: +$('#f-res').value };
+  return { subscriptionKw: +$('#f-kw').value, chargers: +$('#f-disp').value, chargerKw: +$('#f-dkw').value, reserve: +$('#f-res').value, dockKw: +$('#f-dock').value };
 }
 function bindWhatIf() {
   const b = $('#replanBtn'); if (!b) return;
@@ -516,7 +520,7 @@ function renderMove(id) {
   const loaded = curb + v.containerTareT + t.cargo_t, empty = curb + v.containerTareT;
   const e1 = P.legEnergy(out, t.kind === 'import' ? loaded : empty, { vehicle: v }), e2 = P.legEnergy(back, t.kind === 'import' ? empty : loaded, { vehicle: v });
   const parts = {}; for (const k of Object.keys(e1.parts)) parts[k] = e1.parts[k] + e2.parts[k];
-  const idle = t.energy - e1.kwh - e2.kwh; // note: legs in the plan include peak-hour time multipliers for aux
+  const idle = t.energy + (t.dockKwh || 0) - e1.kwh - e2.kwh; // turns, dock dwell and peak-hour time differences
   const ev = findMoveEvent(t.idx);
   // elevation profile from real SRTM samples
   const prof = []; let d = 0;
@@ -552,6 +556,7 @@ function renderMove(id) {
         <span class="k">Regen on descents</span><span class="v">${fmt(parts.regen, 1)} kWh</span>
         <span class="k">Autonomy compute + sensors</span><span class="v">${fmt(parts.aux + Math.max(0, idle), 1)} kWh</span>
         <span class="k">Gross weight out / back</span><span class="v">${fmt(t.kind === 'import' ? loaded : empty, 1)} / ${fmt(t.kind === 'import' ? empty : loaded, 1)} t</span>
+        ${t.dockKwh > 0 ? `<span class="k">Charged at the dock during ${t.kind === 'import' ? 'unload' : 'load'}</span><span class="v">+${fmt(t.dockKwh, 1)} kWh</span>` : ''}
         <span class="k">Worst point vs start</span><span class="v">−${fmt(t.need, 1)} kWh</span>
         ${ev ? `<span class="k">State of charge</span><span class="v">${pct(ev.socStart)} → ${pct(ev.socEnd)}</span>` : ''}
       </div></div></section>
